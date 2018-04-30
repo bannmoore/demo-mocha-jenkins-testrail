@@ -1,0 +1,17 @@
+version: "2.1"
+services:
+  testrail:
+    image: testrail:local
+    build:
+      context: ./docker/testrail
+      dockerfile: Dockerfile
+    ports:
+      - "7070:80"
+
+  jenkins:
+    image: jenkins/jenkins:latest
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - "./docker/jenkins/jenkins_home:/var/jenkins_home"

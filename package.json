@@ -1,0 +1,18 @@
+{
+  "name": "mocha-jenkins-testrail",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --recursive"
+  },
+  "keywords": [],
+  "author": "Brittany <moore.brittanyann@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "chai": "^4.1.2",
+    "mocha": "^5.1.1",
+    "mocha-junit-reporter": "^1.17.0",
+    "mocha-testrail-reporter": "1.0.12"
+  }
+}
