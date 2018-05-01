@@ -1,20 +1,67 @@
-# Using Mocha, Testrail, and Jenkins Together
+# Continuous Integration: Mocha + TestRail + Jenkins
   
-This is a sandbox for integrating `mocha`, `testrail`, and `jenkins`.
-
-## Jenkins
-
-### First Time Setup
-
-These steps should only need to be performed once locally, provided that you don't delete your `jenkins_home` directory. It's linked to the container using a volume, so it should store all of your local configurations.
-
-If for some reason the `jenkins_home` volume isn't working, you can copy your container's Jenkins configuration to your local machine using this command:
+This repo demonstrates a continuous integration workflow for JavaScript projects. This repo can be used locally as a POC, but it requires quite a bit of set up. If you already have server instances of Jenkins and/or TestRail, you can skip most of the steps.
 
 ```
-docker cp $CONTAINER_ID:var/jenkins_home/ jenkins_home
+When changes are pushed to GitHub, execute Mocha tests in Jenkins and publish the results to TestRail.
 ```
 
-#### Bring Up Docker Container and Provide Admin Password
+## What You'll Need:
+
+- A GitHub repository with Mocha tests and `mocha-junit-reporter` as a dependency (feel free to fork or copy this one)
+- A Jenkins instance*
+- A TestRail instance*
+
+*Follow the steps below to set up a local instance
+
+## TestRail Local Set Up
+
+There isn't currently a preset `TestRail` container in docker (probably because the server version requires a subscription), so you'll need to download a copy of the installer. This will also require signing up for a free trial of TestRail.
+
+- Go to the [TestRail site](http://www.gurock.com/testrail/)
+- Click "Try TestRail For Free"
+- Select "TestRail Server" and create an account
+- Download the `php5` version of the TestRail `.zip` file
+- Place the `.zip` file in this project's `/docker/testrail` directory
+
+Now, bring up the `testrail` container:
+
+```
+docker-compose up -d testrail
+```
+
+If you check the logs (`docker-compose logs testrail`), it should say "Starting web server apache2" after a couple of seconds. If all goes well, open the browser to `http://localhost:7070` and login.
+
+The credentials are:
+
+```
+username: admin@admin.com
+password: admin
+```
+
+The file `docker/testrail/testrail.sql` preloads a configuration into TestRail, so the server will start with a demo project ready to go.
+
+### Save TestRail Configuration
+
+If at any point you want to save your local TestRail configuration (new projects, test cases, etc.), you can use this command to copy the container's data to your local:
+
+```
+docker-compose up -d testrail
+docker exec mocha-jenkins-testrail_testrail_1 /usr/bin/mysqldump testrail > ./docker/testrail/testrail.sql
+```
+
+### Other Resources
+
+- [Staging TestRail with Docker](http://philipson.co.il/post/taming-a-legacy-application-with-docker/)
+- [testrail-docker (working fork)](https://github.com/bannmoore/testrail-docker)
+
+## Jenkins Local Set Up
+
+Most of Jenkins' data resides in `/var/jenkins_home` on the docker container. The `jenkins` service in this repo sets up a volume between that folder and `testrail/jenkins/jenkins_home` in this repo, so once you've performed the set up once you shouldn't need to do it again.
+
+If you don't want to lose your configuration, _don't_ delete `docker/jenkins/jenkins_home`.
+
+### Bring Up The Container and Provide The Admin Password
 
 ```
 docker-compose up jenkins
@@ -30,11 +77,35 @@ jenkins_1   |
 jenkins_1   | This may also be found at: /var/jenkins_home/secrets/initialAdminPassword
 ```
 
-Navigate to `localhost:8080` and provide the password on the "Unlock Jenkins" screen.
+Navigate to `localhost:8080` and provide the password on the "Unlock Jenkins" screen. Choose the option that auto-installs plugins for you and wait for it to finish.
 
-#### Install Plugins
+### Generate a Static URL for Jenkins
 
-Ensure that the following plugins are installed:
+Since this repo uses a local instance of Jenkins, we need to set up a static URL that forwards to `localhost` (GitHub won't be able to connect to it otherwise).
+
+Install `ngrok` and create a new account, if you haven't already done so.
+
+In a terminal, run:
+
+```
+ngrok http 8080
+```
+
+The static URL will be displayed in the terminal. Use this instead of `localhost` to connect GitHub to Jenkins.
+
+## Connect GitHub to Jenkins
+
+Now that you have Jenkins and TestRail running (either locally or on a server), we can set up the CI process. In this section, we'll connect Jenkins to our GitHub repository and tell GitHub to push changes to Jenkins.
+
+### Create Personal access token
+
+On the GitHub account that will send builds to Jenkins, create a "Personal access token" at this URL: `https://github.com/settings/tokens`. The token needs `admin:repo_hook`, `repo`, and `repo:status` permissions.
+
+The token will only be displayed once, so make sure you copy it for later use.
+
+### Verify Plugins
+
+In the Jenkins web UI, click "Manage Jenkins", then "Manage Pulgins", and ensure that the following plugins are installed:
 
 - Credentials Plugin
 - Git Plugin
@@ -47,23 +118,23 @@ Ensure that the following plugins are installed:
 - SSH Slaves plugin
 - NodeJS plugin
 
-**Note**: All of these except `NodeJs Plugin` will be installed by choosing the default plugins at startup.
+### Create GitHub Credentials
 
-#### Set Up Credentials
+Next, we'll need to store the GitHub credentials in Jenkins.
 
-- On the GitHub account that will execute builds, create a "Personal access token" for Jenkins `https://github.com/settings/tokens`
-- On the Jenkins web application, click "Credentials".
+- In Jenkins, click "Credentials".
 - Under "Stores scoped to Jenkins", click "Jenkins".
 - Under "System", click "Global credentials (unrestricted)".
 - Click "Add Credentials" to create new credentials.
 
 You'll need to add two sets of credentials:
+
 - Kind: Secret Text => the Personal access token created above
 - Kind: Username with password => the GitHub username / password of the account that created the Personal access token
 
-#### Set Up Node
-
-In order to use `npm install` in our Jenkins build, we need to configure the server to use node.
+### Set Up Node 
+ 
+In order to use `npm install` in Jenkins, it has to be configured with `Node`.
 
 - Go to `localhost:8080/configureTools`.
 - Under "NodeJs", click "Add NodeJS".
@@ -72,7 +143,9 @@ In order to use `npm install` in our Jenkins build, we need to configure the ser
 
 Resource: https://wiki.jenkins.io/display/JENKINS/NodeJS+Plugin
 
-#### Create New Job
+### Create New Job
+
+Next, we'll create a Job that communicates with GitHub and executes the tests.
 
 - On the Jenkins web page, click "New Item".
 - Provide any name and select "Freestyle project", then Click "OK".
@@ -91,133 +164,55 @@ npm install
 MOCHA_FILE=./jenkins-test-results.xml ./node_modules/.bin/mocha test --recursive --reporter mocha-junit-reporter
 ```
 
-*If the Node Build Environment option is not available, double-check that the "Set Up Node" steps were completed.
+**Note**: This command assumes that your GitHub repository meets the following criteria:
+- Mocha tests reside in the `test` directory
+- `mocha-junit-reporter` is listed as a dependency or devDependency
 
-#### Install Testrail Plugin
+The JUnit reporter is necessary to properly convert Mocha results to an XML format Jenkins understands.
 
-Use the `build-testrail-plugin.sh` script to get a local version of the `.hpi` file.
+### Add Service to GitHub
 
-- In Jenkins, click "Manage Jenkins" => "Manage Plugins"
-- Select the "Advanced" tab
-- Use the "Upload Plugin" section to upload the `.hpi` file
-- From the main dashboard, click "Manage Jenkins" => "Manage Systems"
-- Scroll down to the "Testrail" section and provide host, username, and password for Testrail
-- Go to the tests job configuration page and scroll down to "Post-build Actions"
-- Click "Add post-build action" => "Notify TestRail"
-- Fill in "Test Report XMLs" with the filename of the test results (you can find this in "Workspaces")
+Finally, we need to tell the GitHub repository to send updates to the Jenkins instance.
 
-Link to plugin: https://github.com/jenkinsci/testrail-plugin
-
-#### Resources
-
-This link contains the original instructions I adapted from, though there were some gaps:
-https://www.terlici.com/2015/09/29/automated-testing-with-node-express-github-and-jenkins.html
-
-
-### Connect Jenkins to GitHub
-
-Since this repo uses a local instance of Jenkins, we need to set up a static URL that forwards to `localhost` (GitHub won't be able to connect to it otherwise).
-
-Install `ngrok` and create a new account, if you haven't already done so.
-
-In a terminal, run:
-
-```
-ngrok http 8080
-```
-
-The static URL will be displayed in the terminal.
-
-To connect GitHub to the Jenkins instance:
 - On the GitHub repository page, click "Settings", then "Integrations and Services".
 - Click "Add Service" => "Jenkins (GitHub Plugin)"
-- In the field "Jenkins hook url", paste in `https://###-ngrok.io/github-webhook/`*, where ###-ngrok.io is your ngrok host.**
+- In the field "Jenkins hook url", paste in `https://jenkins-host/github-webhook/`, where jenkins-host is your server's host*.
 - Make sure that "Active" is checked.
 - Save the service.
 
 Once the service is created, click "Test service" on the upper right of the panel to test it. From the Jenkins project, you should be able to click "GitHub Hook Log" on the left side and see some text output from the test call. This will tell you that everything is set up correctly.
 
-*The trailing `/` on this URL is **super important**; your service won't work without it.
-**If you are on a free ngrok account, you'll need to update your GitHub service each time your ngrok URL changes.
+**Note**: The trailing / on the Jenkins URL is super important; your service **won't work without it**.
 
-## Testrail
+*If you are using a local instance of Jenkins with `ngrok`, this URL will change _every_ time you restart `ngrok`.
 
-### First Time Set Up
+## Connect Jenkins to TestRail
 
-- go to the [testrail](https://secure.gurock.com/customers/testrail/trial/) website and download the  `.zip` (server version - php5) - you'll need to sign up for the trial
-- put the `.zip` file in the project's `/docker/testrail` directory
+We'll be using the Jenkins [TestRail Plugin](https://github.com/jenkinsci/testrail-plugin) to send Jenkins results to TestRail. This plugin is not installable via the Plugin Manager, so you'll need to get ahold of the `.hpi` file and install it manually using the web UI.
 
-### Run Locally
+**Note**: You can use the `build-testrail-plugin.sh` script in this repo to get a local version of the `.hpi` file.
 
-```
-docker-compose up -d testrail
-```
+Once you have the `.hpi`:
 
-- check the logs - it should say "Starting web server apache2" after a couple of seconds.
-- open `localhost:7070/testrail`
-- login name: `admin@admin.com` / password: `admin`
+- In Jenkins, click "Manage Jenkins" => "Manage Plugins"
+- Select the "Advanced" tab
+- Use the "Upload Plugin" section to upload the `.hpi` file
 
-### Create Test Cases and Link Them to Mocha
+After the TestRail Plugin is installed:
 
-- in the browser instance of testrail, click the "My Project" project
-- click the "Test Cases" tab
-- click "Add Case" and give it a name
-- update the `it` block of a `mocha` test to contain that id.
+- From the main dashboard, click "Manage Jenkins" => "Configure Systems"
+- Scroll down to the "Testrail" section and provide host, username, and password for Testrail
+  - The "host" will need to match the link we created between testrail and jenkins using Docker (`http://testrail`).
+- Go to the tests job configuration page and scroll down to "Post-build Actions"
+- Click "Add post-build action" => "Notify TestRail"
+- Fill in "Test Report XMLs" with the filename of the test results (you can find this in "Workspaces")
 
-For example, if the test case id is "C1", do this:
+## Try it Out
 
-```js
-it('C1 should do something', function () {
-  ...
-});
-```
+Once all these steps are completed, you should have a working CI process. Pushing changes to GitHub should trigger a test run in Jenkins, which is then sent to TestRail. Tada!
 
-If you run the tests and see this message, you need to link test cases:
+## Other Resources
 
-```
-Publishing 0 test result(s) to http://testrail/testrail/index.php
-Results published to http://testrail/testrail/index.php?/runs/view/4
-Error: {"error":"Field :results cannot be empty (one result is required)"}
-```
+This link contains the original instructions I adapted from, though there were some gaps:
+https://www.terlici.com/2015/09/29/automated-testing-with-node-express-github-and-jenkins.html
 
-### Run Tests Send Test Results to Testrail
-
-Source `TESTRAIL_LOGIN_EMAIL` and `TESTRAIL_LOGIN_PASSWORD`:
-
-```
-export TESTRAIL_LOGIN_EMAIL=admin@admin.com
-export TESTRAIL_LOGIN_PASSWORD=admin
-```
-
-Finally, run the tests:
-
-```
-./bin/test e2e --build --testrail
-```
-
-If this completes successfully, you should see this message in the console:
-
-```
-Publishing 1 test result(s) to http://testrail/testrail/index.php
-Results published to http://testrail/testrail/index.php?/runs/view/3
-```
-
-The run should also be visible on `localhost:7070/testrail` under the "Test Runs" tab.
-
-### Backup Testrail Database
-
-You can copy docker's testrail database to your local machine in order to modify and check in the "seed" database.
-
-```
-docker-compose up -d testrail
-docker exec mocha-jenkins-testrail_testrail_1 /usr/bin/mysqldump testrail > ./docker/testrail/testrail.sql
-```
-
-### Other Resources
-[mocha-testrail-reporter](https://www.npmjs.com/package/mocha-testrail-reporter)
-[Staging TestRail with Docker](http://philipson.co.il/post/taming-a-legacy-application-with-docker/)
-[testrail-docker (working fork)](https://github.com/bannmoore/testrail-docker)
-
-### Issues
-
-mysql doesn't start - https://github.com/docker/for-linux/issues/72#issuecomment-319904698
