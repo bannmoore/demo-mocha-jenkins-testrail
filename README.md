@@ -85,13 +85,28 @@ Resource: https://wiki.jenkins.io/display/JENKINS/NodeJS+Plugin
   - Under "Post-build actions", select "Add post-build action" => "Publish JUnit test result report" and provide a name for "Test report XMLs" (`jenkins-test-results.xml`).
   - Click "Save"
 
-```
+``` 
 # Execute shell script
 npm install
 MOCHA_FILE=./jenkins-test-results.xml ./node_modules/.bin/mocha test --recursive --reporter mocha-junit-reporter
 ```
 
 *If the Node Build Environment option is not available, double-check that the "Set Up Node" steps were completed.
+
+#### Install Testrail Plugin
+
+Use the `build-testrail-plugin.sh` script to get a local version of the `.hpi` file.
+
+- In Jenkins, click "Manage Jenkins" => "Manage Plugins"
+- Select the "Advanced" tab
+- Use the "Upload Plugin" section to upload the `.hpi` file
+- From the main dashboard, click "Manage Jenkins" => "Manage Systems"
+- Scroll down to the "Testrail" section and provide host, username, and password for Testrail
+- Go to the tests job configuration page and scroll down to "Post-build Actions"
+- Click "Add post-build action" => "Notify TestRail"
+- Fill in "Test Report XMLs" with the filename of the test results (you can find this in "Workspaces")
+
+Link to plugin: https://github.com/jenkinsci/testrail-plugin
 
 #### Resources
 
