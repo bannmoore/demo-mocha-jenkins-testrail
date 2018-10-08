@@ -19,9 +19,11 @@ RUN echo "zend_extension=/ioncube/ioncube_loader_lin_5.5.so" > /etc/php5/cli/php
   mv /etc/php5/apache2/php.ini.new /etc/php5/apache2/php.ini
 
 COPY testrail-*.zip /
+RUN cd /var/www/html && rm index.html
 RUN cd /var/www/html && unzip -q /testrail-*.zip
+RUN cd /var/www/html && mv testrail/* .
 
-COPY config.php /var/www/html/testrail/config.php
+COPY config.php /var/www/html/config.php
 COPY testrail.sql /
 COPY run.sh /
 RUN chmod +x run.sh

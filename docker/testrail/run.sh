@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash
 
 mkdir /var/www/html/testrail/logs
 chown www-data /var/www/html/testrail/logs
